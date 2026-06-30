@@ -1,25 +1,54 @@
-# Flutter Facades
+## Flutter Facades
 
-A Laravel-inspired Facade and Helper system for Dart and Flutter applications.
+**Flutter Facades** is a Laravel-inspired Facade and Helper system for Dart and Flutter. It provides a clean, static API for accessing common application services like **Cache**, **Auth**, **Http**, **Log**, and **Config** — without passing dependencies through constructors or widget trees.
 
-Access common application services like **Cache**, **Auth**, **Http**, **Log**, and **Config** through a simple, static API such as `Cache.get()` or `cache().get()`.
+Behind the scenes, every facade call routes through an **IoC container / Service Resolver**, so implementations are fully swappable, mockable, and testable.
+
+<div align="center">
+  <strong>English</strong> | <a href="README.fa.md">فارسی</a>
+</div>
+
+---
+
+> **⚠️ Alpha Notice:** Flutter Facades is under active development. The API may change. Not recommended for production use.
 
 ## The Problem This Solves
 
 - **Scattered service access** — No consistent way to access services across your app
 - **Too much boilerplate** — Passing dependencies through constructors, widget trees, or manual DI
 - **Untestable singletons** — Global state that's hard to mock or replace in tests
-- **Service layer coupled to widget tree** — Needing BuildContext just to access a service
+- **Service layer coupled to widget tree** — Needing `BuildContext` just to access a service
 
-## How It Works
+## Features
 
-Behind the simple facade API sits an **IoC container / Service Resolver**. Every call to `Cache.get()`, `auth()`, `Config.get()`, etc. is delegated to a registered implementation. This means:
+- **Laravel-style Facades** — `Cache.get()`, `Config.get()`, `Log.info()`, `Http.get()`, `Auth.check()`
+- **Helper Functions** — `cache()`, `config()`, `logger()`, `http()`, `auth()` as shorthand alternatives
+- **Service Container** — `SimpleContainer` with transient, singleton, and instance bindings, plus scoped child containers
+- **Zone-aware Runtime** — `FacadeRuntime` supports request-level scoped resolvers via Dart Zones
+- **5 Contracts** — `AppConfig`, `AppHttpClient`, `AppLogger`, `AuthManager`, `CacheStore`, `AppUser`
+- **5 Default Implementations** — Work out of the box: `MapConfig`, `ConsoleLogger`, `MemoryCacheStore`, `NullAuthManager`, `ThrowingHttpClient`
+- **Default Provider** — `DefaultFacadeServiceProvider` registers all defaults at once
+- **Rearch Adapter** — `RearchFacadeResolver` and `RearchFacadeBootstrap` for apps using Rearch capsules
+- **Zero Dependencies** — Pure Dart, no runtime dependencies, works with any Flutter or Dart project
 
-- ✅ **Interchangeable implementations** — Swap implementations without touching your code
-- ✅ **Easily mockable** — Replace real implementations with mocks in tests
-- ✅ **Testable** — Your code depends on interfaces, not concrete classes
-- ✅ **Rearch-compatible** — Works with Rearch capsules as a backend resolver
-- ✅ **Zero dependencies** — Pure Dart, no runtime dependencies
+---
+
+## Getting Started
+
+### Add dependency
+
+```yaml
+dependencies:
+  flutter_facades: ^0.1.0
+```
+
+### Import
+
+```dart
+import 'package:flutter_facades/flutter_facades.dart';
+```
+
+---
 
 ## Quick Start
 
@@ -43,12 +72,14 @@ void main() {
 
   // 4. Use facades anywhere!
   Cache.put('user_id', 42);
-  print(Cache.get('user_id')); // 42
+  print(Cache.get<int>('user_id')); // 42
 
   Log.info('Application started', context: {'version': '1.0.0'});
   print(Config.get<String>('app.name')); // MyApp
 }
 ```
+
+---
 
 ## Available Facades
 
@@ -60,39 +91,68 @@ void main() {
 | `Http`   | `http()`    | `AppHttpClient`  | `ThrowingHttpClient`   |
 | `Log`    | `logger()`  | `AppLogger`      | `ConsoleLogger`        |
 
+Each facade exposes both static methods and the underlying service:
+
+```dart
+Cache.put('key', value);      // Facade static method
+cache().put('key', value);    // Helper function
+Cache.store.put('key', value); // Direct access to the service
+```
+
+---
+
+## Contracts / Interfaces
+
+| Contract | Purpose | Key Methods |
+|----------|---------|-------------|
+| `AppConfig` | Type-safe config access | `get<T>(key)`, `getOrNull<T>(key)`, `has(key)` |
+| `AppHttpClient` | Abstract HTTP client | `get()`, `post()`, `put()`, `delete()` |
+| `AppLogger` | Structured logging | `debug()`, `info()`, `warning()`, `error()` |
+| `AuthManager` | Auth lifecycle | `check`, `user`, `token`, `attempt()`, `logout()` |
+| `CacheStore` | Generic cache with TTL | `get()`, `put()`, `forget()`, `has()`, `flush()`, `remember()` |
+| `AppUser` | Simple user model | `id`, `name`, `email`, `extra` |
+
+---
+
 ## Custom Implementations
 
-Implement any contract interface and register it:
+Implement any contract and register it:
 
 ```dart
 container.instance<AppLogger>(MyCloudLogger());
 
 // Now Log.info() sends to your cloud logger
+Log.info('This goes to the cloud!', context: {'env': 'production'});
 ```
 
-## Contracts / Interfaces
-
-- `AppConfig` — Type-safe config access
-- `AppHttpClient` — Abstract HTTP client (get/post/put/delete)
-- `AppLogger` — Structured logging with levels and context
-- `AuthManager` — Auth lifecycle (login, logout, check)
-- `CacheStore` — Generic cache with TTL support
-- `AppUser` — Simple user model
-
-## Testing
+With `SimpleContainer`, you have three binding modes:
 
 ```dart
-test('cache facade stores and retrieves values', () {
-  final container = SimpleContainer()
-    ..instance<CacheStore>(MemoryCacheStore());
-  FacadeRuntime.setRootResolver(container);
-
-  Cache.put('key', 'value');
-  expect(Cache.get('key'), 'value');
-
-  FacadeRuntime.reset();
-});
+container.bind<CacheStore>((c) => MyCache());       // New instance each time
+container.singleton<CacheStore>((c) => MyCache());   // Lazy singleton
+container.instance<CacheStore>(MyCache());            // Pre-built instance
 ```
+
+---
+
+## Scoped Resolvers (Zones)
+
+Use `FacadeRuntime.runWithResolver` to create request-level scopes:
+
+```dart
+void handleRequest(Request request) {
+  final scope = container.scope();
+  scope.instance<AppConfig>(RequestConfig(request));
+
+  FacadeRuntime.runWithResolver(scope, () {
+    // Inside this scope, Config.get() reads request-level config
+    // Outside, it falls back to the root resolver
+    processRequest();
+  });
+}
+```
+
+---
 
 ## Rearch Integration
 
@@ -107,6 +167,73 @@ RearchFacadeBootstrap.setAsRoot(
   http: () => httpCapsule(read, myContainer),
 );
 ```
+
+This creates a `RearchFacadeResolver`, registers all five readers, and sets it as the root resolver in one call.
+
+---
+
+## Architecture
+
+```
+                        User Code
+                           |
+            +--------------+--------------+
+            |              |              |
+       Facade Classes   Helper Fns    Direct resolve
+       (Auth, Cache,    (auth(),       (app<T>())
+        Config, Http,    cache(),
+        Log)             config(),
+                         http(),
+                         logger())
+            |              |              |
+            +------+-------+--------------+
+                   |
+          FacadeRuntime.resolve<T>()
+            (zone-aware static)
+                   |
+         +---------+---------+
+         |                   |
+  SimpleContainer     RearchFacadeResolver
+  (DI container)      (Rearch adapter)
+         |                   |
+    Default provider    Rearch capsules
+    (5 out-of-box       (user-defined)
+     implementations)
+```
+
+---
+
+## Testing
+
+Flutter Facades makes testing straightforward — swap real implementations with mocks:
+
+```dart
+test('cache facade stores and retrieves values', () {
+  final container = SimpleContainer()
+    ..instance<CacheStore>(MemoryCacheStore());
+  FacadeRuntime.setRootResolver(container);
+
+  Cache.put('key', 'value');
+  expect(Cache.get('key'), 'value');
+
+  FacadeRuntime.reset();
+});
+```
+
+```dart
+test('mock auth', () {
+  final mockAuth = MockAuthManager(); // Your mock
+  final container = SimpleContainer()
+    ..instance<AuthManager>(mockAuth);
+  FacadeRuntime.setRootResolver(container);
+
+  expect(Auth.check, false);
+
+  FacadeRuntime.reset();
+});
+```
+
+---
 
 ## License
 
